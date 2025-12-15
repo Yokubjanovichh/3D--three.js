@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Interactive Particles Fix</title>
+    <style>
+      body {
+        margin: 0;
+        overflow: hidden;
+        background-color: #050505;
+        font-family: "Segoe UI", sans-serif;
+      }
+      canvas {
+        display: block;
+      }
+
+      #ui-container {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        z-index: 10;
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
+        pointer-events: none;
+      }
+
+      .glass-panel {
+        background: rgba(20, 20, 25, 0.8); /* Сделал темнее для контраста */
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        padding: 20px;
+        border-radius: 16px;
+        color: white;
+        pointer-events: auto;
+        width: 220px;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+      }
+
+      h2 {
+        margin: 0 0 15px 0;
+        font-size: 16px;
+        font-weight: 600;
+        color: #fff;
+      }
+
+      .btn-grid {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+
+      button {
+        background: rgba(255, 255, 255, 0.1);
+        border: 1px solid transparent;
+        color: #ccc;
+        padding: 10px 0;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+        font-size: 13px;
+      }
+
+      button:hover {
+        background: rgba(255, 255, 255, 0.2);
+        color: white;
+      }
+
+      /* Активная кнопка - ярко-голубая */
+      button.active {
+        background: #00d2ff;
+        color: #000;
+        font-weight: bold;
+        box-shadow: 0 0 15px rgba(0, 210, 255, 0.4);
+        border-color: #00d2ff;
+      }
+
+      .color-wrapper {
+        margin-top: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      input[type="color"] {
+        -webkit-appearance: none;
+        border: none;
+        width: 40px;
+        height: 40px;
+        cursor: pointer;
+        background: none;
+        padding: 0;
+      }
+      input[type="color"]::-webkit-color-swatch {
+        border: 2px solid #fff;
+        border-radius: 50%;
+      }
+
+      #video-input {
+        display: none;
+      }
+      #status {
+        position: absolute;
+        bottom: 20px;
+        left: 20px;
+        color: rgba(255, 255, 255, 0.6);
+        font-size: 12px;
+        pointer-events: none;
+      }
+    </style>
+
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js"
+      crossorigin="anonymous"
+    ></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"
+      crossorigin="anonymous"
+    ></script>
+  </head>
+  <body>
+    <div id="ui-container">
+      <div class="glass-panel">
+        <h2>Форма частиц</h2>
+        <!-- Исправлено: добавлены data-shape, убраны onclick -->
+        <div class="btn-grid" id="shape-buttons">
+          <button data-shape="sphere" class="active">Сфера</button>
+          <button data-shape="heart">Сердце</button>
+          <button data-shape="flower">Цветок</button>
+          <button data-shape="saturn">Сатурн</button>
+          <button data-shape="torus">Абстракция</button>
+          <button data-shape="dna">ДНК</button>
+        </div>
+
+        <div class="color-wrapper">
+          <span>Цвет частиц</span>
+          <input type="color" id="colorPicker" value="#00d2ff" />
+        </div>
+      </div>
+    </div>
+
+    <div id="status">Загрузка... Разрешите доступ к камере.</div>
+    <video id="video-input"></video>
+
+    <script type="module">
+      import * as THREE from "three";
+
+      // === НАСТРОЙКИ ===
+      const PARTICLE_COUNT = 20000;
+      const PARTICLE_SIZE = 0.08;
+      let currentShape = "sphere";
+      let handScale = 1.0;
+      let targetScale = 1.0;
+
+      // === СЦЕНА THREE.JS ===
+      const scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x050505, 0.02);
+
+      const camera = new THREE.PerspectiveCamera(
+        75,
+        window.innerWidth / window.innerHeight,
+        0.1,
+        1000
+      );
+      camera.position.z = 18;
+
+      const renderer = new THREE.WebGLRenderer({
+        antialias: true,
+        alpha: true,
+      });
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      document.body.appendChild(renderer.domElement);
+
+      // === ГЕНЕРАЦИЯ ЧАСТИЦ ===
+      const geometry = new THREE.BufferGeometry();
+      const positions = new Float32Array(PARTICLE_COUNT * 3);
+      const targets = new Float32Array(PARTICLE_COUNT * 3);
+
+      for (let i = 0; i < PARTICLE_COUNT * 3; i++) {
+        positions[i] = (Math.random() - 0.5) * 50;
+        targets[i] = positions[i];
+      }
+
+      geometry.setAttribute(
+        "position",
+        new THREE.BufferAttribute(positions, 3)
+      );
+
+      const material = new THREE.PointsMaterial({
+        color: 0x00d2ff,
+        size: PARTICLE_SIZE,
+        sizeAttenuation: true,
+        transparent: true,
+        opacity: 0.8,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+
+      const particles = new THREE.Points(geometry, material);
+      scene.add(particles);
+
+      // === МАТЕМАТИКА ФОРМ ===
+      function getSpherePoint(r) {
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.acos(2 * Math.random() - 1);
+        return {
+          x: r * Math.sin(phi) * Math.cos(theta),
+          y: r * Math.sin(phi) * Math.sin(theta),
+          z: r * Math.cos(phi),
+        };
+      }
+
+      const shapes = {
+        sphere: (i) => {
+          const p = getSpherePoint(8);
+          return [p.x, p.y, p.z];
+        },
+        heart: (i) => {
+          const t = Math.random() * Math.PI * 2;
+          const x = 16 * Math.pow(Math.sin(t), 3);
+          const y =
+            13 * Math.cos(t) -
+            5 * Math.cos(2 * t) -
+            2 * Math.cos(3 * t) -
+            Math.cos(4 * t);
+          const z = (Math.random() - 0.5) * 4;
+          return [x * 0.5, y * 0.5, z];
+        },
+        flower: (i) => {
+          const theta = Math.random() * Math.PI * 2;
+          const k = 5;
+          const r = 8 * Math.cos(k * theta) * Math.random();
+          return [
+            r * Math.cos(theta),
+            r * Math.sin(theta),
+            (Math.random() - 0.5) * 2,
+          ];
+        },
+        saturn: (i) => {
+          if (Math.random() > 0.4) {
+            const angle = Math.random() * Math.PI * 2;
+            const r = 8 + Math.random() * 4;
+            return [
+              r * Math.cos(angle),
+              (Math.random() - 0.5) * 0.5,
+              r * Math.sin(angle),
+            ];
+          }
+          const p = getSpherePoint(5);
+          return [p.x, p.y, p.z];
+        },
+        torus: (i) => {
+          const t = Math.random() * Math.PI * 2 * 3;
+          const p = 2,
+            q = 3,
+            scale = 3;
+          let x = (2 + Math.cos(q * t)) * Math.cos(p * t);
+          let y = (2 + Math.cos(q * t)) * Math.sin(p * t);
+          let z = Math.sin(q * t);
+          return [x * scale, y * scale, z * scale * 2];
+        },
+        dna: (i) => {
+          const t = (i / PARTICLE_COUNT) * Math.PI * 10;
+          const x = 3 * Math.cos(t + (i % 2 ? Math.PI : 0));
+          const z = 3 * Math.sin(t + (i % 2 ? Math.PI : 0));
+          const y = (i / PARTICLE_COUNT - 0.5) * 28;
+          return [x, y, z];
+        },
+      };
+
+      function generateShape(shapeName) {
+        currentShape = shapeName;
+        for (let i = 0; i < PARTICLE_COUNT; i++) {
+          const [x, y, z] = shapes[shapeName](i);
+          targets[i * 3] = x;
+          targets[i * 3 + 1] = y;
+          targets[i * 3 + 2] = z;
+        }
+      }
+
+      // Инициализация
+      generateShape("sphere");
+
+      // === ИСПРАВЛЕННАЯ ЛОГИКА UI ===
+      // Теперь мы добавляем слушатели событий через JS, а не через HTML onclick
+      const buttons = document.querySelectorAll("#shape-buttons button");
+      buttons.forEach((btn) => {
+        btn.addEventListener("click", (e) => {
+          // 1. Убрать активный класс у всех
+          buttons.forEach((b) => b.classList.remove("active"));
+
+          // 2. Добавить активный класс нажатой кнопке
+          const targetBtn = e.target.closest("button"); // На случай клика по тексту внутри
+          targetBtn.classList.add("active");
+
+          // 3. Сменить фигуру
+          const shape = targetBtn.getAttribute("data-shape");
+          if (shapes[shape]) {
+            generateShape(shape);
+          }
+        });
+      });
+
+      const colorPicker = document.getElementById("colorPicker");
+      colorPicker.addEventListener("input", (e) => {
+        material.color.set(e.target.value);
+      });
+
+      // === MEDIAPIPE РУКИ ===
+      const statusElement = document.getElementById("status");
+
+      function onResults(results) {
+        if (
+          results.multiHandLandmarks &&
+          results.multiHandLandmarks.length > 0
+        ) {
+          statusElement.innerText =
+            "Рука найдена. Сведите пальцы для масштаба.";
+          statusElement.style.color = "#00d2ff";
+
+          const lm = results.multiHandLandmarks[0];
+          const d = Math.sqrt(
+            Math.pow(lm[4].x - lm[8].x, 2) + Math.pow(lm[4].y - lm[8].y, 2)
+          );
+
+          // Нормализация масштаба (0.3 ... 2.0)
+          const zoom = Math.max(0, Math.min(1, (d - 0.03) / 0.2));
+          targetScale = 0.3 + zoom * 1.7;
+        } else {
+          statusElement.innerText = "Покажите руку камере...";
+          statusElement.style.color = "rgba(255,255,255,0.5)";
+          targetScale = 1.0;
+        }
+      }
+
+      const hands = new Hands({
+        locateFile: (file) =>
+          `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`,
+      });
+      hands.setOptions({
+        maxNumHands: 1,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
+      });
+      hands.onResults(onResults);
+
+      const cameraUtils = new Camera(document.getElementById("video-input"), {
+        onFrame: async () => {
+          await hands.send({ image: document.getElementById("video-input") });
+        },
+        width: 640,
+        height: 480,
+      });
+      cameraUtils.start();
+
+      // === АНИМАЦИЯ ===
+      const clock = new THREE.Clock();
+
+      function animate() {
+        requestAnimationFrame(animate);
+        const delta = clock.getDelta();
+        const time = clock.getElapsedTime();
+        const pos = particles.geometry.attributes.position.array;
+
+        // Плавное перемещение (Lerp)
+        for (let i = 0; i < PARTICLE_COUNT * 3; i++) {
+          pos[i] += (targets[i] - pos[i]) * 4.0 * delta;
+        }
+        particles.geometry.attributes.position.needsUpdate = true;
+
+        // Вращение
+        particles.rotation.y = time * 0.15;
+
+        // Масштаб от руки
+        handScale += (targetScale - handScale) * 0.1;
+        particles.scale.setScalar(handScale);
+
+        renderer.render(scene, camera);
+      }
+
+      window.addEventListener("resize", () => {
+        camera.aspect = window.innerWidth / window.innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      });
+
+      animate();
+    </script>
+  </body>
+</html>
